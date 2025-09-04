@@ -26,15 +26,8 @@ class SpatialCorrelationSampler(nn.Module):
 
     Shape:
         - Input1, Input2: (B, C, H, W)
-        - Output: (B, PatchH, PatchW, oH, oW)
-
-    Examples:
-        >>> # MM-Tracker configuration
-        >>> sampler = SpatialCorrelationSampler(kernel_size=9, patch_size=1, padding=4)
-        >>> input1 = torch.randn(1, 512, 19, 34)
-        >>> input2 = torch.randn(1, 512, 19, 34)
-        >>> output = sampler(input1, input2)
-        >>> print(output.shape)  # (1, 1, 1, 19, 34)
+        - Output: (B, PatchH, PatchW, oH, oW) when kernel_size=1
+        - Output: (B, 1, KernelH * KernelW, oH, oW) when patch_size=1
     """
 
     def __init__(
@@ -57,147 +50,172 @@ class SpatialCorrelationSampler(nn.Module):
 
     def forward(self, input1: torch.Tensor, input2: torch.Tensor) -> torch.Tensor:
         """Forward pass"""
-        return self._compute_correlation(input1, input2)
-
-    def _compute_correlation(
-            self,
-            input1: torch.Tensor,
-            input2: torch.Tensor
-    ) -> torch.Tensor:
-        """Main correlation computation"""
         B, C, H, W = input1.shape
-
-        # Calculate effective kernel and patch dimensions
-        kernel_h = self.dilation[0] * (self.kernel_size[0] - 1) + 1
-        kernel_w = self.dilation[1] * (self.kernel_size[1] - 1) + 1
-        patch_h = self.dilation_patch[0] * (self.patch_size[0] - 1) + 1
-        patch_w = self.dilation_patch[1] * (self.patch_size[1] - 1) + 1
-
-        # Calculate output dimensions
-        out_h = calculate_output_size(H, kernel_h, self.padding[0], self.stride[0])
-        out_w = calculate_output_size(W, kernel_w, self.padding[1], self.stride[1])
-
+        
         # Apply padding
-        input1_padded = F.pad(input1, [self.padding[1], self.padding[1],
-                                       self.padding[0], self.padding[0]])
-        input2_padded = F.pad(input2, [self.padding[1], self.padding[1],
-                                       self.padding[0], self.padding[0]])
-
-        # Choose implementation based on configuration
-        if self.patch_size == (1, 1):
-            return self._correlation_patch_one(
-                input1_padded, input2_padded,
-                kernel_h, kernel_w, out_h, out_w
-            )
+        if self.padding[0] > 0 or self.padding[1] > 0:
+            input1 = F.pad(input1, [self.padding[1], self.padding[1],
+                                   self.padding[0], self.padding[0]])
+            input2 = F.pad(input2, [self.padding[1], self.padding[1],
+                                   self.padding[0], self.padding[0]])
+        
+        if self.kernel_size[0] == 1 and self.kernel_size[1] == 1:
+            # Special case: kernel_size = 1, variable patch_size
+            return self._correlation_patch_based(input1, input2)
+        elif self.patch_size[0] == 1 and self.patch_size[1] == 1:
+            # Special case: patch_size = 1, variable kernel_size
+            return self._correlation_kernel_based(input1, input2)
         else:
-            return self._correlation_patch_multiple(
-                input1_padded, input2_padded,
-                kernel_h, kernel_w, patch_h, patch_w, out_h, out_w
-            )
-
-    def _correlation_patch_one(
-            self,
-            input1: torch.Tensor,
-            input2: torch.Tensor,
-            kernel_h: int,
-            kernel_w: int,
-            out_h: int,
-            out_w: int
-    ) -> torch.Tensor:
-        """Optimized implementation for patch_size=1"""
-        B, C, H_pad, W_pad = input1.shape
-
-        # Extract center points from input1
-        if self.stride == (1, 1) and self.padding == (0, 0):
-            input1_centers = input1.reshape(B, C, -1)
-        else:
-            input1_centers = F.unfold(input1, kernel_size=1, stride=self.stride)
-
-        # Extract search windows from input2
-        input2_windows = F.unfold(
-            input2,
-            kernel_size=self.kernel_size,
-            stride=self.stride,
-            dilation=self.dilation
-        )
-
-        # Reshape for correlation computation
-        input1_centers = input1_centers.view(B, C, 1, out_h * out_w)
-        input2_windows = input2_windows.view(
-            B, C, self.kernel_size[0] * self.kernel_size[1], out_h * out_w
-        )
-
-        # Compute correlation
-        correlation = (input1_centers * input2_windows).sum(dim=1)
-
-        # Reshape to output format
-        correlation = correlation.view(
-            B, self.kernel_size[0], self.kernel_size[1], out_h, out_w
-        )
-
-        # Adjust output for compatibility
-        if self.kernel_size == (1, 1):
-            return correlation.view(B, 1, 1, out_h, out_w)
-
-        return correlation.view(B, 1, 1, out_h, out_w).contiguous()
-
-    def _correlation_patch_multiple(
-            self,
-            input1: torch.Tensor,
-            input2: torch.Tensor,
-            kernel_h: int,
-            kernel_w: int,
-            patch_h: int,
-            patch_w: int,
-            out_h: int,
-            out_w: int
-    ) -> torch.Tensor:
-        """General implementation for arbitrary patch_size"""
-        B, C, H_pad, W_pad = input1.shape
-
+            # General case: both kernel_size and patch_size > 1
+            return self._correlation_general(input1, input2)
+    
+    def _correlation_kernel_based(self, input1: torch.Tensor, input2: torch.Tensor) -> torch.Tensor:
+        """
+        Optimized implementation for patch_size=1, variable kernel_size
+        Used in MM-Tracker configuration
+        """
+        B, C, H, W = input1.shape
+        
+        # Calculate output dimensions
+        out_h = (H - 1) // self.stride[0] + 1
+        out_w = (W - 1) // self.stride[1] + 1
+        
+        # Initialize output - format (B, 1, K_h*K_w, out_h, out_w)
+        K_h, K_w = self.kernel_size
+        output = torch.zeros(B, 1, K_h * K_w, out_h, out_w, 
+                            device=input1.device, dtype=input1.dtype)
+        
+        # Extract query positions from input1
+        for y in range(out_h):
+            for x in range(out_w):
+                y_coord = y * self.stride[0]
+                x_coord = x * self.stride[1]
+                
+                # Get single pixel from input1
+                query = input1[:, :, y_coord:y_coord+1, x_coord:x_coord+1]  # (B, C, 1, 1)
+                
+                # Compute correlation with kernel window in input2
+                idx = 0
+                for ky in range(K_h):
+                    for kx in range(K_w):
+                        # Calculate offset with dilation
+                        dy = ky * self.dilation[0]
+                        dx = kx * self.dilation[1]
+                        
+                        y_start = y_coord + dy - (K_h // 2) * self.dilation[0]
+                        x_start = x_coord + dx - (K_w // 2) * self.dilation[1]
+                        
+                        # Check boundaries
+                        if 0 <= y_start < H and 0 <= x_start < W:
+                            target = input2[:, :, y_start:y_start+1, x_start:x_start+1]
+                            # Compute correlation
+                            corr = (query * target).sum(dim=1).squeeze()  # (B,)
+                            output[:, 0, idx, y, x] = corr
+                        
+                        idx += 1
+        
+        return output
+    
+    def _correlation_patch_based(self, input1: torch.Tensor, input2: torch.Tensor) -> torch.Tensor:
+        """
+        Optimized implementation for kernel_size=1, variable patch_size
+        Used in FlowNet configuration
+        """
+        B, C, H, W = input1.shape
+        
+        # Calculate output dimensions
+        out_h = (H - 1) // self.stride[0] + 1
+        out_w = (W - 1) // self.stride[1] + 1
+        
+        # Initialize output - format (B, P_h, P_w, out_h, out_w)
+        P_h, P_w = self.patch_size
+        output = torch.zeros(B, P_h, P_w, out_h, out_w,
+                            device=input1.device, dtype=input1.dtype)
+        
+        # Process each output position
+        for y in range(out_h):
+            for x in range(out_w):
+                y_coord = y * self.stride[0]
+                x_coord = x * self.stride[1]
+                
+                # Get patch from input1 centered at (y_coord, x_coord)
+                patch1 = self._extract_patch(input1, y_coord, x_coord, P_h, P_w)
+                
+                # Get corresponding patch from input2
+                patch2 = self._extract_patch(input2, y_coord, x_coord, P_h, P_w)
+                
+                if patch1 is not None and patch2 is not None:
+                    # Compute element-wise correlation
+                    corr = patch1 * patch2  # (B, C, P_h, P_w)
+                    corr = corr.sum(dim=1)  # (B, P_h, P_w)
+                    output[:, :, :, y, x] = corr
+        
+        return output
+    
+    def _extract_patch(self, input: torch.Tensor, center_y: int, center_x: int,
+                       patch_h: int, patch_w: int) -> Optional[torch.Tensor]:
+        """Extract a patch centered at given coordinates with dilation"""
+        B, C, H, W = input.shape
+        
+        # Calculate patch boundaries with dilation
+        half_patch_h = patch_h // 2
+        half_patch_w = patch_w // 2
+        
+        # Initialize patch tensor
+        patch = torch.zeros(B, C, patch_h, patch_w, 
+                           device=input.device, dtype=input.dtype)
+        
+        for ph in range(patch_h):
+            for pw in range(patch_w):
+                # Calculate actual position with dilation
+                y = center_y + (ph - half_patch_h) * self.dilation_patch[0]
+                x = center_x + (pw - half_patch_w) * self.dilation_patch[1]
+                
+                # Check boundaries
+                if 0 <= y < H and 0 <= x < W:
+                    patch[:, :, ph, pw] = input[:, :, y, x]
+        
+        return patch
+    
+    def _correlation_general(self, input1: torch.Tensor, input2: torch.Tensor) -> torch.Tensor:
+        """
+        General implementation for arbitrary kernel_size and patch_size
+        """
+        B, C, H, W = input1.shape
+        
+        # Calculate output dimensions
+        out_h = (H - 1) // self.stride[0] + 1
+        out_w = (W - 1) // self.stride[1] + 1
+        
+        K_h, K_w = self.kernel_size
+        P_h, P_w = self.patch_size
+        
         # Initialize output
-        output = torch.zeros(
-            B, self.patch_size[0], self.patch_size[1], out_h, out_w,
-            device=input1.device, dtype=input1.dtype
-        )
-
-        # Extract patches from input1
-        input1_patches = F.unfold(
-            input1,
-            kernel_size=self.patch_size,
-            stride=self.stride,
-            dilation=self.dilation_patch
-        )
-
-        # Process each kernel position
-        for kh in range(self.kernel_size[0]):
-            for kw in range(self.kernel_size[1]):
-                # Calculate displacement
-                dh = kh * self.dilation[0]
-                dw = kw * self.dilation[1]
-
-                # Extract shifted patches from input2
-                if dh < H_pad and dw < W_pad:
-                    input2_shifted = input2[:, :, dh:, dw:]
-
-                    # Check if we can extract valid patches
-                    if input2_shifted.shape[2] >= patch_h and input2_shifted.shape[3] >= patch_w:
-                        input2_patches = F.unfold(
-                            input2_shifted,
-                            kernel_size=self.patch_size,
-                            stride=self.stride,
-                            dilation=self.dilation_patch
-                        )
-
-                        # Ensure same spatial dimensions
-                        min_size = min(input1_patches.shape[2], input2_patches.shape[2])
-
-                        # Compute correlation for each patch position
-                        correlation = (input1_patches[:, :, :min_size] *
-                                       input2_patches[:, :, :min_size]).sum(dim=1)
-
-                        # Store in output
-                        # This is simplified - full implementation would handle patch positions
-                        output[:, 0, 0, :, :] += correlation.view(B, out_h, out_w)
-
+        output = torch.zeros(B, K_h * K_w * P_h * P_w, out_h, out_w,
+                            device=input1.device, dtype=input1.dtype)
+        
+        idx = 0
+        for ky in range(K_h):
+            for kx in range(K_w):
+                for py in range(P_h):
+                    for px in range(P_w):
+                        for y in range(out_h):
+                            for x in range(out_w):
+                                y_coord = y * self.stride[0]
+                                x_coord = x * self.stride[1]
+                                
+                                # Position in input1
+                                y1 = y_coord + (py - P_h // 2) * self.dilation_patch[0]
+                                x1 = x_coord + (px - P_w // 2) * self.dilation_patch[1]
+                                
+                                # Position in input2 (with kernel offset)
+                                y2 = y_coord + (ky - K_h // 2) * self.dilation[0] + (py - P_h // 2) * self.dilation_patch[0]
+                                x2 = x_coord + (kx - K_w // 2) * self.dilation[1] + (px - P_w // 2) * self.dilation_patch[1]
+                                
+                                if 0 <= y1 < H and 0 <= x1 < W and 0 <= y2 < H and 0 <= x2 < W:
+                                    corr = (input1[:, :, y1, x1] * input2[:, :, y2, x2]).sum(dim=1)
+                                    output[:, idx, y, x] = corr
+                        
+                        idx += 1
+        
         return output
