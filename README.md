@@ -350,8 +350,8 @@ If you use this implementation in your research, please consider citing:
 @software{spatial_correlation_sampler_pytorch,
   title={Spatial Correlation Sampler - Pure PyTorch Implementation},
   author={Pure PyTorch Implementation},
-  year={2024},
-  url={https://github.com/your-repo/spatial_correlation_sampler}
+  year={2025},
+  url={https://github.com/yytang2012/spatial_correlation_sampler.git}
 }
 ```
 
