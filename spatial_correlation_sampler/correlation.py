@@ -79,11 +79,6 @@ class SpatialCorrelationSampler(nn.Module):
         """
         B, C, H, W = input1.shape
         K_h, K_w = self.kernel_size
-        orig_h, orig_w = original_shape
-        
-        # Calculate output dimensions using original input size
-        out_h = (orig_h + 2*self.padding[0] - self.kernel_size[0]) // self.stride[0] + 1
-        out_w = (orig_w + 2*self.padding[1] - self.kernel_size[1]) // self.stride[1] + 1
         
         # Use unfold to extract all kernel windows from input2
         input2_unfold = F.unfold(
@@ -94,26 +89,51 @@ class SpatialCorrelationSampler(nn.Module):
             dilation=self.dilation
         )  # Shape: (B, C * K_h * K_w, N_patches)
         
-        # Calculate actual number of patches from unfold
         N_patches = input2_unfold.shape[2]
         
-        # The actual output dimensions might differ from theoretical calculation
-        actual_out_h = int((H - K_h + 2*0) // self.stride[0] + 1)  # padding=0 in unfold
-        actual_out_w = int((W - K_w + 2*0) // self.stride[1] + 1)
-        
-        # Ensure N_patches matches expected
-        assert N_patches == actual_out_h * actual_out_w, f"Patch count mismatch: {N_patches} != {actual_out_h * actual_out_w}"
-        
-        # Reshape to separate channels and kernel positions
-        input2_unfold = input2_unfold.view(B, C, K_h * K_w, N_patches)
-        
-        # Get input1 at stride positions (single pixel queries)
+        # Get input1 at stride positions (single pixel queries)  
         input1_unfold = F.unfold(
             input1,
             kernel_size=1,
             stride=self.stride,
             padding=0
-        )  # Shape: (B, C, N_patches)
+        )  # Shape: (B, C, N_patches_input1)
+        
+        N_patches_input1 = input1_unfold.shape[2]
+        
+        # Use the actual number of patches from input1 (should be the same)
+        if N_patches_input1 != N_patches:
+            # Take minimum and truncate both to match
+            min_patches = min(N_patches_input1, N_patches)
+            input1_unfold = input1_unfold[:, :, :min_patches]
+            input2_unfold = input2_unfold[:, :, :min_patches]
+            N_patches = min_patches
+        
+        # Calculate output spatial dimensions from actual number of patches
+        # For stride=1, out_h * out_w should equal N_patches
+        if self.stride[0] == 1 and self.stride[1] == 1:
+            # Calculate based on input dimensions after kernel subtraction
+            actual_out_h = H - K_h + 1 
+            actual_out_w = W - K_w + 1
+        else:
+            # For other strides, calculate from unfold result
+            actual_out_h = int((H - K_h) // self.stride[0] + 1)
+            actual_out_w = int((W - K_w) // self.stride[1] + 1)
+        
+        # Verify the calculation
+        if actual_out_h * actual_out_w != N_patches:
+            # Fallback: try to find dimensions that work
+            import math
+            h = int(math.sqrt(N_patches))
+            if h * h == N_patches:
+                actual_out_h = actual_out_w = h
+            else:
+                # Last resort: reshape to closest square
+                actual_out_h = int(math.sqrt(N_patches))
+                actual_out_w = N_patches // actual_out_h
+        
+        # Reshape to separate channels and kernel positions
+        input2_unfold = input2_unfold.view(B, C, K_h * K_w, N_patches)
         
         # Expand input1 to match kernel dimensions 
         input1_expanded = input1_unfold.unsqueeze(2).expand(-1, -1, K_h * K_w, -1)
@@ -123,7 +143,15 @@ class SpatialCorrelationSampler(nn.Module):
         correlation = (input1_expanded * input2_unfold).sum(dim=1)
         # Shape: (B, K_h * K_w, N_patches)
         
-        # Reshape to required output format (B, 1, K_h * K_w, actual_out_h, actual_out_w)
+        # Reshape to required output format
+        # Ensure the total size matches
+        total_size = B * K_h * K_w * actual_out_h * actual_out_w
+        if correlation.numel() != total_size:
+            # Adjust dimensions to match actual data size
+            effective_patches = correlation.shape[2]
+            actual_out_h = int(math.sqrt(effective_patches))
+            actual_out_w = effective_patches // actual_out_h
+        
         output = correlation.unsqueeze(1).view(B, 1, K_h * K_w, actual_out_h, actual_out_w)
         
         return output

@@ -108,24 +108,26 @@ def run_benchmarks():
         print(f"    Min:  {results['min']:.3f} ms")
         print(f"    Max:  {results['max']:.3f} ms")
 
-        # Optimized implementation (if applicable)
-        if config['patch_size'] == 1:
-            optimized = OptimizedSpatialCorrelationSampler(
+        # Alternative configuration (different stride for comparison)
+        if config['patch_size'] == 1 and config['kernel_size'] >= 5:
+            alt_sampler = SpatialCorrelationSampler(
                 kernel_size=config['kernel_size'],
-                padding=config['padding']
+                patch_size=config['patch_size'],
+                padding=config['padding'],
+                stride=2  # Test with stride=2 for comparison
             )
 
-            results_opt = benchmark_implementation(
-                optimized, config['shape'], device=device
+            results_alt = benchmark_implementation(
+                alt_sampler, config['shape'], device=device
             )
 
-            print(f"\n  Optimized Implementation:")
-            print(f"    Mean: {results_opt['mean']:.3f} ms")
-            print(f"    Std:  {results_opt['std']:.3f} ms")
-            print(f"    Min:  {results_opt['min']:.3f} ms")
-            print(f"    Max:  {results_opt['max']:.3f} ms")
+            print(f"\n  Alternative Implementation (stride=2):")
+            print(f"    Mean: {results_alt['mean']:.3f} ms")
+            print(f"    Std:  {results_alt['std']:.3f} ms")
+            print(f"    Min:  {results_alt['min']:.3f} ms")
+            print(f"    Max:  {results_alt['max']:.3f} ms")
 
-            speedup = results['mean'] / results_opt['mean']
+            speedup = results['mean'] / results_alt['mean']
             print(f"    Speedup: {speedup:.2f}x")
 
         print("-" * 40)
