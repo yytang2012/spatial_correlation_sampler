@@ -38,16 +38,21 @@ def basic_example():
     feat2 = torch.zeros(batch_size, channels, height, width)
     feat2[0, 0, 3, 3] = 1.0  # Peak at (3,3)
     
+    # Add some noise to make correlation more visible
+    feat1 += torch.randn_like(feat1) * 0.01
+    feat2 += torch.randn_like(feat2) * 0.01
+    
     print(f"Feature map 1 (peak at center):")
     print(feat1[0, 0].numpy())
     print(f"\nFeature map 2 (peak shifted to (3,3)):")
     print(feat2[0, 0].numpy())
     
     # Configure correlation sampler
-    # 3x3 search window, single pixel comparison
+    # For MM-Tracker style: kernel_size=1, patch_size=3 (patch searches around query)
+    # This should better match the expected behavior
     sampler = SpatialCorrelationSampler(
-        kernel_size=3,
-        patch_size=1,
+        kernel_size=1,  # Single query point
+        patch_size=3,   # 3x3 search patch
         stride=1,
         padding=1
     )
@@ -57,24 +62,50 @@ def basic_example():
     
     print(f"\nInput shape: {feat1.shape}")
     print(f"Output shape: {correlation.shape}")
-    print(f"Output channels: 9 (3x3 search window)")
+    print(f"Output format: kernel_size=1, patch_size=3 → patch-based correlation")
     
     # Analyze correlation at center pixel (2,2)
-    # Note: kernel_size=3, patch_size=1 returns (B, 1, K², H, W) format
-    center_correlations = correlation[0, 0, :, 2, 2]  # Extract from (B, 1, 9, H, W)
+    # Note: kernel_size=1, patch_size=3 returns (B, patch_size², H, W) format after reshaping
+    print(f"Actual correlation shape: {correlation.shape}")
+    
+    if len(correlation.shape) == 4:
+        # Shape is (B, patch_size², H, W)
+        center_correlations = correlation[0, :, 2, 2]  # Extract from (B, 9, H, W)
+    else:
+        # Shape is (B, patch_h, patch_w, H, W)
+        center_correlations = correlation[0, :, :, 2, 2].flatten()
     print(f"\nCorrelation at center pixel (2,2):")
     print(f"Displacement grid (3x3):")
     displacement_grid = center_correlations.view(3, 3)
     print(displacement_grid.numpy())
     
+    # Debug: show raw correlation values
+    print(f"\nDebug - Raw correlation values at center:")
+    print(f"Min/Max correlation: {center_correlations.min():.6f}/{center_correlations.max():.6f}")
+    print(f"Channel indices and their displacements:")
+    for i, val in enumerate(center_correlations):
+        row, col = divmod(i, 3)
+        kernel_disp = (row - 1, col - 1)
+        print(f"  Channel {i}: kernel_disp{kernel_disp} = {val:.6f}")
+    
     # Find maximum correlation
     max_channel = center_correlations.argmax().item()
     max_displacement = divmod(max_channel, 3)  # Convert to (row, col)
-    actual_displacement = (max_displacement[0] - 1, max_displacement[1] - 1)  # Center at (1,1)
+    
+    # For kernel_size=3, patch_size=1, the kernel searches around the query point
+    # Channel mapping: kernel moves relative to feat2, so displacement is reversed
+    actual_displacement = (1 - max_displacement[0], 1 - max_displacement[1])  # Reverse kernel direction
     
     print(f"\nMaximum correlation at channel {max_channel}")
-    print(f"This corresponds to displacement: {actual_displacement}")
-    print(f"Expected displacement: (1, 1) ✓" if actual_displacement == (1, 1) else "❌")
+    print(f"Kernel displacement: ({max_displacement[0] - 1}, {max_displacement[1] - 1})")
+    print(f"Detected motion: {actual_displacement}")
+    print(f"Expected motion (feat2 relative to feat1): (1, 1)")
+    
+    # Check if correlation makes sense
+    if center_correlations.max() > 0:
+        print(f"Result: {'✓' if actual_displacement == (1, 1) else '❌'}")
+    else:
+        print("❌ No significant correlation found - check implementation")
 
 
 def flownet_example():
@@ -119,7 +150,8 @@ def flownet_example():
     print(f"  Channel 440: displacement (+10, +10)")
     
     # Simulate finding maximum correlation
-    center_pixel_corr = correlation[0, :, height//2, width//2]
+    # FlowNet output format is (B, patch_h, patch_w, H, W)
+    center_pixel_corr = correlation[0, :, :, height//2, width//2].flatten()
     max_channel = center_pixel_corr.argmax().item()
     
     # Convert channel index to displacement
@@ -285,7 +317,8 @@ def visualization_example():
         correlation = sampler(feat1, feat2)
         
         # Find correlation at the original pattern location
-        corr_at_pattern = correlation[0, :, 15, 15].view(7, 7).detach()
+        # kernel_size=1, patch_size=7 gives output (B, patch_h, patch_w, H, W)
+        corr_at_pattern = correlation[0, :, :, 15, 15].detach()
         
         # Create visualization
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
