@@ -5,10 +5,7 @@ Performance benchmarks for correlation sampler
 import time
 import torch
 import numpy as np
-from spatial_correlation_sampler import (
-    SpatialCorrelationSampler,
-    OptimizedSpatialCorrelationSampler
-)
+from spatial_correlation_sampler import SpatialCorrelationSampler
 
 
 def benchmark_implementation(

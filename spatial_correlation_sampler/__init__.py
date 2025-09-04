@@ -6,16 +6,6 @@ and motion estimation tasks, commonly used in FlowNet and MM-Tracker.
 """
 
 from .correlation import SpatialCorrelationSampler
-from .optimized import OptimizedSpatialCorrelationSampler
-from .functional import (
-    spatial_correlation_sample,
-    correlation_sample_optimized
-)
 
 __version__ = "1.0.0"
-__all__ = [
-    "SpatialCorrelationSampler",
-    "OptimizedSpatialCorrelationSampler",
-    "spatial_correlation_sample",
-    "correlation_sample_optimized",
-]
+__all__ = ["SpatialCorrelationSampler"]
