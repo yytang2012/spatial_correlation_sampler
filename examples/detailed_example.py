@@ -60,7 +60,8 @@ def basic_example():
     print(f"Output channels: 9 (3x3 search window)")
     
     # Analyze correlation at center pixel (2,2)
-    center_correlations = correlation[0, :, 2, 2]
+    # Note: kernel_size=3, patch_size=1 returns (B, 1, K², H, W) format
+    center_correlations = correlation[0, 0, :, 2, 2]  # Extract from (B, 1, 9, H, W)
     print(f"\nCorrelation at center pixel (2,2):")
     print(f"Displacement grid (3x3):")
     displacement_grid = center_correlations.view(3, 3)
