@@ -150,7 +150,8 @@ class SpatialCorrelationSampler(nn.Module):
                     corr = corr.sum(dim=1)  # (B, P_h, P_w)
                     output[:, :, :, y, x] = corr
         
-        return output
+        # Reshape to (B, P_h*P_w, H, W) for compatibility
+        return output.view(B, P_h * P_w, out_h, out_w)
     
     def _extract_patch(self, input: torch.Tensor, center_y: int, center_x: int,
                        patch_h: int, patch_w: int) -> Optional[torch.Tensor]:
