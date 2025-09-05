@@ -91,12 +91,20 @@ def run_benchmarks():
         print(f"  Kernel size: {config['kernel_size']}")
         print(f"  Patch size: {config['patch_size']}")
 
+        # Extract parameters for sampler (filter out non-sampler params)
+        sampler_params = {
+            'kernel_size': config['kernel_size'],
+            'patch_size': config['patch_size'],
+            'padding': config['padding']
+        }
+        
+        # Add optional parameters if present
+        if 'dilation_patch' in config:
+            sampler_params['dilation_patch'] = config['dilation_patch']
+            print(f"  Dilation patch: {config['dilation_patch']}")
+        
         # Standard implementation
-        sampler = SpatialCorrelationSampler(
-            kernel_size=config['kernel_size'],
-            patch_size=config['patch_size'],
-            padding=config['padding']
-        )
+        sampler = SpatialCorrelationSampler(**sampler_params)
 
         results = benchmark_implementation(
             sampler, config['shape'], device=device

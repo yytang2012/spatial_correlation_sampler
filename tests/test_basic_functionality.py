@@ -1,5 +1,5 @@
 """
-基本功能测试
+Basic functionality tests
 """
 import torch
 import sys
@@ -10,10 +10,10 @@ from spatial_correlation_sampler import SpatialCorrelationSampler
 
 
 def test_mmtracker_config():
-    """测试MMTracker配置"""
-    print("测试MMTracker配置...")
+    """Test MMTracker configuration"""
+    print("Testing MMTracker configuration...")
     
-    # 正确的MMTracker参数
+    # Correct MMTracker parameters
     sampler = SpatialCorrelationSampler(
         kernel_size=9,
         patch_size=1, 
@@ -22,32 +22,32 @@ def test_mmtracker_config():
         dilation=1
     )
     
-    # 测试数据
+    # Test data
     B, C, H, W = 2, 256, 30, 40
     x = torch.randn(B, C, H, W)
     y = torch.randn(B, C, H, W)
     
     output = sampler(x, y)
-    print(f"输入: {x.shape}")
-    print(f"输出: {output.shape}")
+    print(f"Input: {x.shape}")
+    print(f"Output: {output.shape}")
     
-    # 验证输出
-    assert len(output.shape) == 5, f"期望5D输出，得到{len(output.shape)}D"
-    assert output.shape == (B, 1, 81, H, W), f"期望形状{(B, 1, 81, H, W)}，得到{output.shape}"
+    # Verify output
+    assert len(output.shape) == 5, f"Expected 5D output, got {len(output.shape)}D"
+    assert output.shape == (B, 1, 81, H, W), f"Expected shape {(B, 1, 81, H, W)}, got {output.shape}"
     
-    # 转换为4D格式（MMTracker期望）
+    # Convert to 4D format (expected by MMTracker)
     output_4d = output[:, 0, :, :, :]
-    print(f"4D格式: {output_4d.shape}")
+    print(f"4D format: {output_4d.shape}")
     assert output_4d.shape == (B, 81, H, W)
     
-    print("✓ MMTracker配置测试通过")
+    print("✓ MMTracker configuration test passed")
 
 
 def test_flownet_config():
-    """测试FlowNet配置"""
-    print("\n测试FlowNet配置...")
+    """Test FlowNet configuration"""
+    print("\nTesting FlowNet configuration...")
     
-    # FlowNet配置
+    # FlowNet configuration
     sampler = SpatialCorrelationSampler(
         kernel_size=1,
         patch_size=21,
@@ -57,33 +57,33 @@ def test_flownet_config():
         dilation_patch=2
     )
     
-    # 测试数据
+    # Test data
     B, C, H, W = 1, 64, 32, 32
     x = torch.randn(B, C, H, W)
     y = torch.randn(B, C, H, W)
     
     output = sampler(x, y)
-    print(f"输入: {x.shape}")
-    print(f"输出: {output.shape}")
+    print(f"Input: {x.shape}")
+    print(f"Output: {output.shape}")
     
-    # FlowNet输出格式检查
+    # FlowNet output format check
     if len(output.shape) == 5:
-        # (B, PatchH, PatchW, H, W) 格式
+        # (B, PatchH, PatchW, H, W) format
         expected_patch_h, expected_patch_w = 21, 21
-        assert output.shape[1:3] == (expected_patch_h, expected_patch_w), f"期望patch尺寸{(expected_patch_h, expected_patch_w)}，得到{output.shape[1:3]}"
+        assert output.shape[1:3] == (expected_patch_h, expected_patch_w), f"Expected patch size {(expected_patch_h, expected_patch_w)}, got {output.shape[1:3]}"
     elif len(output.shape) == 4:
-        # (B, PatchH*PatchW, H, W) 格式
+        # (B, PatchH*PatchW, H, W) format
         expected_channels = 21 * 21  # 441
-        assert output.shape[1] == expected_channels, f"期望{expected_channels}通道，得到{output.shape[1]}"
+        assert output.shape[1] == expected_channels, f"Expected {expected_channels} channels, got {output.shape[1]}"
     
-    print("✓ FlowNet配置测试通过")
+    print("✓ FlowNet configuration test passed")
 
 
 def test_basic_correlation():
-    """测试基本相关计算"""
-    print("\n测试基本相关计算...")
+    """Test basic correlation computation"""
+    print("\nTesting basic correlation computation...")
     
-    # 简单配置
+    # Simple configuration test
     sampler = SpatialCorrelationSampler(
         kernel_size=3,
         patch_size=1,
@@ -97,19 +97,20 @@ def test_basic_correlation():
     y = torch.randn(B, C, H, W)
     
     output = sampler(x, y)
-    print(f"输入: {x.shape}")
-    print(f"输出: {output.shape}")
+    print(f"Input: {x.shape}")
+    print(f"Output: {output.shape}")
     
-    # 验证输出合理性
-    assert not torch.isnan(output).any(), "输出包含NaN值"
-    assert torch.isfinite(output).all(), "输出包含无穷值"
+    # Numerical check
+    assert not torch.isnan(output).any(), "Output contains NaN values"
+    assert torch.isfinite(output).all(), "Output contains infinite values"
     
-    print(f"数值范围: [{output.min():.4f}, {output.max():.4f}]")
-    print("✓ 基本相关计算测试通过")
+    print(f"Value range: [{output.min():.4f}, {output.max():.4f}]")
+    
+    print("✓ Basic correlation computation test passed")
 
 
 if __name__ == "__main__":
-    print("Spatial Correlation Sampler 基本功能测试")
+    print("Spatial Correlation Sampler Basic Functionality Test")
     print("=" * 50)
     
     try:
@@ -118,9 +119,9 @@ if __name__ == "__main__":
         test_basic_correlation()
         
         print("\n" + "=" * 50)
-        print("✓ 所有测试通过！")
+        print("✓ All tests passed!")
         
     except Exception as e:
-        print(f"\n✗ 测试失败: {e}")
+        print(f"\n✗ Test failed: {e}")
         import traceback
         traceback.print_exc()
